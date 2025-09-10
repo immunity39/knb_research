@@ -1,27 +1,3 @@
-## Linux カメラデバイスid 確認方法
-## v4l2-ctl --list-devices
-## 結果 UVC Camera:
-##         /dev/video0
-
-# import cv2
-
-# # cap = cv2.VideoCapture(0)
-# # use direct show カメラの設定と解像度の問題回避のため
-# cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-
-# # camera 画像の取得 while
-# while True:
-#     ret, frame = cap.read()
-
-#     cv2.imshow('camera', frame)
-
-#     key = cv2.waitKey(10)
-#     if key == 27: # ESC key to break while
-#         break
-
-# cap.release()
-# cv2.destroyAllWindows()
-
 import cv2
 import cv2.aruco as aruco
 
