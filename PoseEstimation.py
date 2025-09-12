@@ -14,8 +14,8 @@ def detect_and_estimate_pose(camera_id=0, marker_length=0.05):  # 5cmのマー�
     cap = cv2.VideoCapture(camera_id)
 
     # ArUco辞書と検出パラメータ
-    aruco_dict = aruco.Dictionary_get(aruco.DICT_4X4_50)
-    parameters = aruco.DetectorParameters_create()
+    aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
+    parameters = aruco.DetectorParameters()
 
     # カメラ内部パラメータをロード
     camera_matrix, dist_coeffs = load_camera_calibration("calibration.yaml")
@@ -39,7 +39,8 @@ def detect_and_estimate_pose(camera_id=0, marker_length=0.05):  # 5cmのマー�
 
             for i in range(len(ids)):
                 # 座標軸を描画（長さ = 0.03m = 3cm）
-                aruco.drawAxis(frame, camera_matrix, dist_coeffs, rvecs[i], tvecs[i], 0.03)
+                cv2.drawFrameAxes(frame, camera_matrix, dist_coeffs, rvecs[i], tvecs[i], 0.03)
+                # aruco.drawFrameAxes(frame, camera_matrix, dist_coeffs, rvecs[i], tvecs[i], 0.03)
 
                 # 結果をコンソール出力
                 print(f"ID: {ids[i][0]}")
