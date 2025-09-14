@@ -9,7 +9,8 @@ import numpy as np
 from cv2 import aruco
 
 def ArUcoGen():
-    fileName = "./ArUcoMake/aruco2.png"
+    fileName = "./ArUcoMake/aruco3.png"
+    aruco_num = 2
     # Size and offset value
     size = 150
     offset = 10
@@ -17,7 +18,7 @@ def ArUcoGen():
 
     # get dictionary and generate image
     dictionary = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
-    ar_img = aruco.generateImageMarker(dictionary, 1, size)
+    ar_img = aruco.generateImageMarker(dictionary, aruco_num, size)
 
     # make white image
     img = np.zeros((size + offset, size + offset), dtype=np.uint8)
