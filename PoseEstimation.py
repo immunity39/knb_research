@@ -14,7 +14,7 @@ def detect_and_estimate_pose(camera_id=0, marker_length=0.05):  # 5cmのマー�
     cap = cv2.VideoCapture(camera_id)
 
     # ArUco辞書と検出パラメータ
-    aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
+    aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_5X5_50)
     parameters = aruco.DetectorParameters()
 
     # カメラ内部パラメータをロード
