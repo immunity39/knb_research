@@ -10,11 +10,11 @@ def load_camera_calibration(file_path="calibration.yaml"):
     fs.release()
     return camera_matrix, dist_coeffs
 
-def detect_and_estimate_pose(camera_id=0, marker_length=0.05):  # 5cmのマーカ
+def detect_and_estimate_pose(camera_id=2, marker_length=0.05):  # 5cmのマーカ
     cap = cv2.VideoCapture(camera_id)
 
     # ArUco辞書と検出パラメータ
-    aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_5X5_50)
+    aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50) # へへパラメ変更で認識対象のマーカ指定
     parameters = aruco.DetectorParameters()
 
     # カメラ内部パラメータをロード
