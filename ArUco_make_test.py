@@ -9,10 +9,10 @@ import numpy as np
 from cv2 import aruco
 
 def ArUcoGen():
-    fileName = "./ArUcoMake/aruco3.png"
-    aruco_num = 2
+    aruco_num = 3
+    fileName = f"./ArUcoMake/35mm{aruco_num}.png"
     # Size and offset value
-    size = 150
+    size = 35 
     offset = 10
     x_offset = y_offset = int(offset) // 2
 

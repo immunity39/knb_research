@@ -1,6 +1,7 @@
 import cv2
 import cv2.aruco as aruco
 import numpy as np
+import time
 
 # カメラキャリブレーション結果を読み込む関数
 def load_camera_calibration(file_path="calibration.yaml"):
@@ -10,11 +11,11 @@ def load_camera_calibration(file_path="calibration.yaml"):
     fs.release()
     return camera_matrix, dist_coeffs
 
-def detect_and_estimate_pose(camera_id=2, marker_length=0.05):  # 5cmのマーカ
+def detect_and_estimate_pose(camera_id=0, marker_length=0.05):  # 5cmのマーカ
     cap = cv2.VideoCapture(camera_id)
 
     # ArUco辞書と検出パラメータ
-    aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50) # へへパラメ変更で認識対象のマーカ指定
+    aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50) # パラメータ変更で認識対象のマーカ指定
     parameters = aruco.DetectorParameters()
 
     # カメラ内部パラメータをロード
@@ -24,6 +25,8 @@ def detect_and_estimate_pose(camera_id=2, marker_length=0.05):  # 5cmのマー�
         ret, frame = cap.read()
         if not ret:
             break
+
+        time.sleep(0.1)  # 100ms待機
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
