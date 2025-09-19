@@ -10,7 +10,7 @@ def load_camera_calibration(file_path="calibration.yaml"):
     fs.release()
     return camera_matrix, dist_coeffs
 
-def detect_and_estimate_pose(camera_id=2, marker_length=0.05):  # 5cmのマーカ
+def detect_and_estimate_pose(camera_id=0, marker_length=0.01):  # 1cmのマーカ
     cap = cv2.VideoCapture(camera_id)
 
     # ArUco辞書と検出パラメータ
