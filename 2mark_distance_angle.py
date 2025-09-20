@@ -10,7 +10,7 @@ def load_camera_calibration(file_path="calibration.yaml"):
     fs.release()
     return camera_matrix, dist_coeffs
 
-def detect_and_estimate_pose(camera_id=0, marker_length=0.01):  # 1cmのマーカ
+def detect_and_estimate_pose(camera_id=0, marker_length=0.009):  # 1cmのマーカ
     cap = cv2.VideoCapture(camera_id)
     dictionary = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
     parameters = aruco.DetectorParameters()
@@ -33,7 +33,7 @@ def detect_and_estimate_pose(camera_id=0, marker_length=0.01):  # 1cmのマー�
             # 各マーカを描画
             aruco.drawDetectedMarkers(frame, corners, ids)
             for rvec, tvec in zip(rvecs, tvecs):
-                cv2.drawFrameAxes(frame, cameraMatrix, distCoeffs, rvec, tvec, 0.01)
+                cv2.drawFrameAxes(frame, cameraMatrix, distCoeffs, rvec, tvec, 0.009)
 
                 # コンソール出力用配列
                 output = []
@@ -58,7 +58,7 @@ def detect_and_estimate_pose(camera_id=0, marker_length=0.01):  # 1cmのマー�
 
                 # 結果をコンソール出力
                 for id1, id2, dist, angle in output:
-                    print(f"ID {id1} - ID {id2}: 距離 = {dist*100:.2f} cm, 角度差 = {np.degrees(angle):.2f} deg")
+                    # print(f"ID {id1} - ID {id2}: 距離 = {dist*100:.2f} cm, 角度差 = {np.degrees(angle):.2f} deg")
                     cv2.putText(frame, f"ID {id1}-{id2}: {dist*100:.1f}cm, {np.degrees(angle):.1f}deg",
                                 (10, 90 + 30 * (id1 + id2)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
 
@@ -71,4 +71,4 @@ def detect_and_estimate_pose(camera_id=0, marker_length=0.01):  # 1cmのマー�
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    detect_and_estimate_pose(camera_id=0, marker_length=0.01)  # 1cmのマーカ
+    detect_and_estimate_pose(camera_id=0, marker_length=0.009)  # 1cmのマーカ
