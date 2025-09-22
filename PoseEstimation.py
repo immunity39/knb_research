@@ -11,7 +11,7 @@ def load_camera_calibration(file_path="calibration.yaml"):
     fs.release()
     return camera_matrix, dist_coeffs
 
-def detect_and_estimate_pose(camera_id=0, marker_length=0.05):  # 5cmのマーカ
+def detect_and_estimate_pose(camera_id=0, marker_length=0.009):  # 1cmのマーカ
     cap = cv2.VideoCapture(camera_id)
 
     # ArUco辞書と検出パラメータ
@@ -46,9 +46,9 @@ def detect_and_estimate_pose(camera_id=0, marker_length=0.05):  # 5cmのマー�
                 # aruco.drawFrameAxes(frame, camera_matrix, dist_coeffs, rvecs[i], tvecs[i], 0.03)
 
                 # 結果をコンソール出力
-                print(f"ID: {ids[i][0]}")
-                print(f"  移動ベクトル tvec: {tvecs[i].ravel()}")
-                print(f"  回転ベクトル rvec: {rvecs[i].ravel()}")
+                #print(f"ID: {ids[i][0]}")
+                #print(f"  移動ベクトル tvec: {tvecs[i].ravel()}")
+                #print(f"  回転ベクトル rvec: {rvecs[i].ravel()}")
 
                 # rvec を回転行列に変換
                 R, _ = cv2.Rodrigues(rvecs[i])
@@ -57,7 +57,10 @@ def detect_and_estimate_pose(camera_id=0, marker_length=0.05):  # 5cmのマー�
                 x_angle = np.degrees(np.arctan2(R[2,1], R[2,2]))
                 y_angle = np.degrees(np.arctan2(-R[2,0], sy))
                 z_angle = np.degrees(np.arctan2(R[1,0], R[0,0]))
-                print(f"  角度 [deg]: X={x_angle:.1f}, Y={y_angle:.1f}, Z={z_angle:.1f}")
+                #print(f"  角度 [deg]: X={x_angle:.1f}, Y={y_angle:.1f}, Z={z_angle:.1f}")
+
+                cv2.putText(frame, f"ID:{ids[i][0]} X:{tvecs[i][0][0]*100:.1f}cm Y:{tvecs[i][0][1]*100:.1f}cm Z:{tvecs[i][0][2]*100:.1f}cm",
+                            (10, 30 + i*30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
         cv2.imshow("Pose Estimation", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
