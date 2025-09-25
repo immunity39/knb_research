@@ -5,7 +5,7 @@ from cv2 import aruco
 import math
 
 # ---- (ユーザ設定) ----
-PLANE_ID = 10        # 固定平面のマーカID（変更してください）
+PLANE_ID = 4        # 固定平面のマーカID
 CUBE_IDS = [0,1,2,3] # キューブに貼った4つのマーカID (前, 右, 後, 左)
 MARKER_LENGTH = 0.0315  # 31.5 mm (m単位)
 CUBE_WIDTH  = 0.047     # 47 mm
