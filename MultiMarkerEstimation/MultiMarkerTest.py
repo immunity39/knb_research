@@ -178,8 +178,8 @@ def main():
             if prev_rel_T is not None:
                 dt_translation = (T_plane_to_cube[:3,3] - prev_rel_T[:3,3])
                 dt_dist = np.linalg.norm(dt_translation)
-                cv2.putText(frame, f"Delta (m): {dt_translation[0]:.3f},{dt_translation[1]:.3f},{dt_translation[2]:.3f}",
-                            (8,108), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150,200,150), 1)
+                # cv2.putText(frame, f"Delta (cm): {dt_translation[0]:.3f},{dt_translation[1]:.3f},{dt_translation[2]:.3f}", (8,108), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150,200,150), 1)
+                cv2.putText(frame, f"Delta (mm) : {dt_translation*1000} | Delta Dist: {dt_dist*1000:.1f} mm", (8,108), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (150,200,150), 1)
 
             prev_rel_T = T_plane_to_cube.copy()
         else:
