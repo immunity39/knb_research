@@ -7,8 +7,9 @@ import csv
 import os
 
 PLANE_ID = 7              # bord型 平面マーカの ID
+PLANE_MARKER_LENGTH = 0.064        # bord型 マーカのサイズ
 CUBE_IDS = [0,1,2,3]      # キューブに貼った 4 マーカの ID (前, 右, 後, 左)
-MARKER_LENGTH = 0.0315    # 31.5 mm (m単位)
+CUBE_MARKER_LENGTH = 0.0315    # 31.5 mm (m単位)
 CUBE_WIDTH  = 0.047       # 47 mm
 CUBE_DEPTH  = 0.040       # 40 mm
 
@@ -106,7 +107,7 @@ def main():
     camera_matrix, dist_coeffs = load_camera_calibration("calibration.yaml")
     cap = cv2.VideoCapture(0)
     dictionary = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
-    cube_board = build_cube_board(MARKER_LENGTH, CUBE_WIDTH, CUBE_DEPTH)
+    cube_board = build_cube_board(CUBE_MARKER_LENGTH, CUBE_WIDTH, CUBE_DEPTH)
 
     # logging
     if LOG_CSV:
@@ -139,7 +140,7 @@ def main():
             # plane single marker pose
             if PLANE_ID in ids_list:
                 idx = ids_list.index(PLANE_ID)
-                rvecs_p, tvecs_p, _ = aruco.estimatePoseSingleMarkers([corners[idx]], MARKER_LENGTH, camera_matrix, dist_coeffs)
+                rvecs_p, tvecs_p, _ = aruco.estimatePoseSingleMarkers([corners[idx]], PLANE_MARKER_LENGTH, camera_matrix, dist_coeffs)
                 plane_rvec = rvecs_p[0].reshape(3); plane_tvec = tvecs_p[0].reshape(3)
                 plane_avail = True
                 cv2.drawFrameAxes(frame, camera_matrix, dist_coeffs, plane_rvec, plane_tvec, AXIS_LEN_PLANE)
