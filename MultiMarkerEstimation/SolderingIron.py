@@ -6,16 +6,15 @@ import time
 import csv
 import os
 
-PLANE_ID =  7             # 平面マーカの ID
+PLANE_ID = 7              # bord型 平面マーカの ID
 CUBE_IDS = [0,1,2,3]      # キューブに貼った 4 マーカの ID (前, 右, 後, 左)
 MARKER_LENGTH = 0.0315    # 31.5 mm (m単位)
 CUBE_WIDTH  = 0.047       # 47 mm
 CUBE_DEPTH  = 0.040       # 40 mm
 
-# コテ先の位置（**必ず実測でセットすること**）
+# コテ先の位置
 # これは "キューブの board座標系" における座標 (x,y,z) [meters]
-# 例: キューブがコテの持ち手のやや後方についている -> tip は前方(+Z) にある、かつ先端は先に下向き(負Y)の可能性あり
-TIP_OFFSET = np.array([0.0, -0.02, 0.06], dtype=np.float32)  # <- **必ず実測で調整**（例: x=0, y=-2cm, z=6cm）
+TIP_OFFSET = np.array([0.0, -0.20, 0.00], dtype=np.float32)
 
 # 平滑化 (EMA) の係数（0=no smoothing, 1=very slow）
 POS_ALPHA = 0.4
