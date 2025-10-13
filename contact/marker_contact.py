@@ -16,8 +16,8 @@ CUBE_MARKER_LENGTH = 0.0315
 CUBE_WIDTH = 0.047
 CUBE_DEPTH = 0.040
 
-TIP_OFFSET = np.array([0.0, -0.020, 0.00], dtype=np.float32)  # m
-CONTACT_THRESHOLD = 0.0015  # m (1.5 mm)
+TIP_OFFSET = np.array([0.0, -0.20, 0.00], dtype=np.float32)  # m
+CONTACT_THRESHOLD = 0.005 # 5 mm
 LOG_CSV = True
 LOG_PATH = "marker_tip_log.csv"
 MAX_HISTORY = 300  # plot points
@@ -89,15 +89,10 @@ def main():
 
     if LOG_CSV:
         with open(LOG_PATH, "w", newline="") as f:
-            csv.writer(f).writerow(["time","frame","tip_plane_x_m","tip_plane_y_m","tip_plane_z_m","contact"])
+            csv.writer(f).writerow(["time","frame","distance_m","contact"])
 
-    # plotting buffers
-    times = deque(maxlen=MAX_HISTORY)
-    heights = deque(maxlen=MAX_HISTORY)
-    contacts = deque(maxlen=MAX_HISTORY)
-
-    fig, ax, line_height = init_plot()
-
+    times, distances, contacts = deque(maxlen=MAX_HISTORY), deque(maxlen=MAX_HISTORY), deque(maxlen=MAX_HISTORY)
+    fig, ax, line = init_plot()
     frame_idx = 0
     contact_active=False
     contact_start=None
@@ -110,8 +105,9 @@ def main():
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         corners, ids, _ = aruco.detectMarkers(gray, dictionary)
 
-        plane_avail=False; cube_avail=False
-        plane_rvec=plane_tvec=None; cube_rvec=cube_tvec=None
+        plane_avail=cube_avail=False
+        plane_rvec=plane_tvec=None
+        cube_rvec=cube_tvec=None
 
         if ids is not None:
             ids_list = ids.flatten().tolist()
@@ -128,60 +124,64 @@ def main():
                 cv2.drawFrameAxes(frame, K, dist, cube_rvec, cube_tvec, 0.03)
             aruco.drawDetectedMarkers(frame, corners, ids)
 
-        tip_plane = None
+        tip_height = np.nan
         if plane_avail and cube_avail:
-            T_plane = rvec_tvec_to_transform(plane_rvec, plane_tvec)
+            # --- コテ先の座標（カメラ座標系）---
             T_cube = rvec_tvec_to_transform(cube_rvec, cube_tvec)
-            T_plane_inv = transform_inverse(T_plane)
             tip_local_h = np.hstack([TIP_OFFSET.reshape(3,), 1.0])
-            plane_tip = (T_plane_inv @ (T_cube @ tip_local_h))[:3]
-            tip_plane = plane_tip
-            tip_height = plane_tip[2]
-            contact_now = abs(tip_height) < CONTACT_THRESHOLD
+            cam_tip = (T_cube @ tip_local_h)[:3]
+
+            # --- 平面法線 ---
+            R_plane, _ = cv2.Rodrigues(plane_rvec.reshape(3,1))
+            n_plane = R_plane[:, 2]  # 平面マーカのZ軸方向
+            p_plane = plane_tvec.reshape(3)
+
+            # --- コテ先と平面との距離 ---
+            distance_to_plane = abs(np.dot(n_plane, cam_tip - p_plane))
+            tip_height = distance_to_plane * 1000  # mm単位
+
+            contact_now = distance_to_plane < CONTACT_THRESHOLD
         else:
-            tip_height = np.nan
             contact_now = False
 
-        # record + log
+        # --- ログと可視化 ---
         tnow = time.time()
         times.append(tnow)
-        heights.append(tip_height*1000 if not math.isnan(tip_height) else np.nan)
+        distances.append(tip_height)
         contacts.append(1 if contact_now else 0)
 
-        if LOG_CSV and tip_plane is not None:
+        if LOG_CSV and not math.isnan(tip_height):
             with open(LOG_PATH, "a", newline="") as f:
-                csv.writer(f).writerow([tnow, frame_idx, tip_plane[0], tip_plane[1], tip_plane[2], int(contact_now)])
+                csv.writer(f).writerow([tnow, frame_idx, distance_to_plane, int(contact_now)])
 
-        # contact state transition detection
+        # 状態遷移
         if contact_now and not contact_active:
             contact_active=True; contact_start=tnow; print(f"[marker] contact start @ {tnow}")
-        if (not contact_now) and contact_active:
-            contact_active=False; duration = tnow - (contact_start or tnow); print(f"[marker] contact end, dur={duration:.3f}s"); contact_start=None
+        if not contact_now and contact_active:
+            contact_active=False; dur = tnow - (contact_start or tnow)
+            print(f"[marker] contact end, dur={dur:.3f}s"); contact_start=None
 
-        # update plot (simple)
+        # プロット更新
         if len(times)>1:
-            t0 = times[0]
-            x = [tt - t0 for tt in times]
-            y = list(heights)
-            line_height.set_data(x, y)
-            ax.set_xlim(max(0, x[-1]-10), x[-1]+0.1)  # show last ~10 sec
-            ax.figure.canvas.draw()
-            ax.figure.canvas.flush_events()
+            t0=times[0]
+            x=[tt-t0 for tt in times]; y=list(distances)
+            line.set_data(x, y)
+            ax.set_xlim(max(0, x[-1]-10), x[-1]+0.1)
+            ax.figure.canvas.draw(); ax.figure.canvas.flush_events()
             plt.pause(0.001)
 
-        # draw text on frame
-        text = f"TipZ(mm): {heights[-1]:.2f}" if not math.isnan(heights[-1]) else "TipZ(mm): N/A"
-        cv2.putText(frame, text, (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0) if contact_now else (200,200,200), 2)
+        # 画像表示
+        color = (0,0,255) if contact_now else (200,200,200)
+        cv2.putText(frame, f"Tip->Plane: {tip_height:.2f} mm", (10,30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
         if contact_now:
             cv2.putText(frame, "CONTACT", (10,60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,0,255), 2)
-
         cv2.imshow("Marker Tip Contact", frame)
+
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    cap.release()
-    cv2.destroyAllWindows()
-    plt.ioff()
+    cap.release(); cv2.destroyAllWindows(); plt.ioff()
     print("Finished. CSV:", LOG_PATH)
 
 if __name__ == "__main__":
