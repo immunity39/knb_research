@@ -18,8 +18,7 @@ FLIP_FRAME = False # 必要に応じてフレームを反転
 ARUCO_DICT = aruco.DICT_4X4_50
 
 # --- 基板 (Plane) の設定 (hand_contact.py より) ---
-# [重要] IDをコテと重複しないように変更 (例: 10, 11, 12, 13)
-PLANE_MARKER_IDS = [10, 11, 12, 13] # [top-left, top-right, bottom-right, bottom-left]
+PLANE_MARKER_IDS = [4, 5, 7, 6] # [top-left, top-right, bottom-right, bottom-left]
 PLANE_MARKER_LENGTH = 0.04     # 基板マーカのサイズ (m)
 PLANE_MARKER_GAP_X = 0.20    # 基板マーカ間の横ギャップ (m)
 PLANE_MARKER_GAP_Y = 0.15    # 基板マーカ間の縦ギャップ (m)
@@ -32,7 +31,7 @@ CUBE_WIDTH  = 0.047       # 47 mm
 CUBE_DEPTH  = 0.040       # 40 mm
 AXIS_LEN_CUBE = 0.03
 # コテ先の位置 (キューブのローカル座標系)
-TIP_OFFSET = np.array([0.0, -0.20, 0.00], dtype=np.float32)
+TIP_OFFSET = np.array([0.0, -0.01, 0.00], dtype=np.float32)
 
 # --- MediaPipe (Hand/Solder) の設定 ---
 MP_MAX_HANDS = 2
