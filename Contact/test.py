@@ -31,7 +31,7 @@ CUBE_WIDTH  = 0.047       # 47 mm
 CUBE_DEPTH  = 0.040       # 40 mm
 AXIS_LEN_CUBE = 0.03
 # コテ先の位置 (キューブのローカル座標系) # 下に 18 cm ずらす
-TIP_OFFSET = np.array([0.0, -0.02, 0.0], dtype=np.float32) # m単位
+TIP_OFFSET = np.array([0.0, -0.04, 0.0], dtype=np.float32) # m単位
 
 # --- MediaPipe (Hand/Solder) の設定 ---
 MP_MAX_HANDS = 2
