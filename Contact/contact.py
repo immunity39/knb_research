@@ -37,6 +37,9 @@ TIP_OFFSET = np.array([0.0, -0.04, 0.00], dtype=np.float32)
 MP_MAX_HANDS = 2
 MP_DETECT_CONF = 0.5
 MP_TRACK_CONF = 0.5
+HAND_FOR_SOLDER = "Right"  # ハンダを持つ手 (Right or Left)
+HAND_FOR_IRON = "Left"     # ハンダコテを持つ手
+SOLDER_TIP_OFFSET_M = 0.04 # 指先から仮想ハンダ先端までの距離 (4cm)
 
 # --- 平滑化 (EMA) の設定 ---
 USE_SMOOTHING_PLANE = True   # 基板ポーズの平滑化
@@ -47,18 +50,21 @@ SMOOTH_ALPHA_TIP_ROT = 0.4   # コテ先姿勢のEMA係数
 
 # --- 接触判定の閾値とデバウンス ---
 # (A) コテ先 vs 基板
-TIP_BOARD_Z_THRESH = 0.015   # 1.5 cm
-TIP_BOARD_XY_THRESH = 0.05   # 基板中心から 5 cm 以内
+TIP_BOARD_Z_THRESH = 0.015   # 1.5 cm (基板平面からのZ距離)
+TIP_BOARD_XY_THRESH = 0.05   # 5.0 cm (基板中心からのXY平面距離)
 # (B) 仮想ハンダ vs 基板
-SOLDER_BOARD_XY_THRESH = 0.05 # 基板中心から 5 cm 以内
+SOLDER_BOARD_XY_THRESH = 0.05 # 5.0 cm (基板中心からのXY平面距離)
 # (C) コテ先 vs 仮想ハンダ
-TIP_SOLDER_DIST_THRESH = 0.02 # 2 cm
+TIP_SOLDER_DIST_THRESH = 0.02 # 2.0 cm (コテ先とハンダ間の3D距離)
 # 確認フレーム数（デバウンス）
 TOUCH_CONFIRM_FRAMES = 3
 
 # --- ログ出力 ---
 LOG_CSV = True
 LOG_PATH = "soldering_log.csv"
+
+# --- 面積推定用 ---
+MAX_CONTACT_AREA_MM2 = 10.0 # 推定最大面積 (mm^2)
 # ------------------------------------------
 
 
@@ -133,7 +139,6 @@ def build_cube_board(marker_length, width, depth, dictionary):
 
 # --- 基板 (Plane) の定義 (hand_contact.py より) ---
 def make_marker_object_points(x, y, z=0, marker_length=PLANE_MARKER_LENGTH):
-    """指定座標(x, y)を中心としたマーカの4隅座標を返す"""
     half = marker_length / 2
     return np.array([
         [x - half, y + half, z],
@@ -143,7 +148,6 @@ def make_marker_object_points(x, y, z=0, marker_length=PLANE_MARKER_LENGTH):
     ], dtype=np.float32)
 
 def build_plane_board(dictionary):
-    """4隅マーカで基板を定義する"""
     half_x = PLANE_MARKER_GAP_X / 2
     half_y = PLANE_MARKER_GAP_Y / 2
     coords = {
@@ -163,7 +167,6 @@ def build_plane_board(dictionary):
 
 # --- 描画・計算系 (両方から) ---
 def project_point_and_draw(img, point3d, rvec, tvec, camera_matrix, dist_coeffs, color=(0,0,255), radius=6):
-    """オブジェクトローカル座標系の点を画像に投影描画"""
     try:
         pts2d, _ = cv2.projectPoints(np.array([point3d], dtype=np.float32), rvec.reshape(3,1), tvec.reshape(3,1), camera_matrix, dist_coeffs)
         p = tuple(pts2d.ravel().astype(int))
@@ -173,9 +176,7 @@ def project_point_and_draw(img, point3d, rvec, tvec, camera_matrix, dist_coeffs,
         return None
 
 def project_point_cam_coord(img, point3d_cam, camera_matrix, dist_coeffs, color=(255,255,0), radius=6):
-    """カメラ座標系の3D点を画像に投影描画"""
     try:
-        # rvec, tvec が 0 の場合、入力 point3d はカメラ座標系とみなされる
         pts2d, _ = cv2.projectPoints(np.array([point3d_cam], dtype=np.float32), np.zeros(3), np.zeros(3), camera_matrix, dist_coeffs)
         p = tuple(pts2d.ravel().astype(int))
         cv2.circle(img, p, radius, color, -1)
@@ -184,21 +185,45 @@ def project_point_cam_coord(img, point3d_cam, camera_matrix, dist_coeffs, color=
         return None
 
 def line_plane_intersection(plane_point, plane_normal, ray_origin, ray_dir):
-    """レイと平面の交点を計算"""
     denom = np.dot(plane_normal, ray_dir)
-    if abs(denom) < 1e-6:
-        return None # 平行
+    if abs(denom) < 1e-6: return None
     d = np.dot(plane_point - ray_origin, plane_normal) / denom
-    if d < 0: # 交点がレイの始点より後ろ
-        return None
+    if d < 0: return None
     return ray_origin + d * ray_dir
 
 def camera_to_local(point_cam, T_inv):
-    """カメラ座標系 -> ローカル座標系"""
     point_cam_h = np.hstack([point_cam.reshape(3,), 1.0])
     point_local_h = (T_inv @ point_cam_h)
     return point_local_h[:3]
 
+# --- (新規) 面積推定 ---
+def estimate_contact_area(R_plane_to_cube):
+    if R_plane_to_cube is None:
+        return 0.0, 0.0
+
+    # コテの軸ベクトル (ローカル -Y 方向) [0, -1, 0]
+    V_tip_dir = R_plane_to_cube @ np.array([0.0, -1.0, 0.0])
+    
+    # 基板の法線ベクトル (ローカル Z 方向) [0, 0, 1]
+    V_plane_normal = np.array([0.0, 0.0, 1.0])
+    
+    # コテ軸と基板法線の間の角度 (theta) のコサイン
+    cos_theta = np.dot(V_tip_dir, V_plane_normal)
+    
+    # 0〜180度
+    theta_deg = np.degrees(np.arccos(np.clip(cos_theta, -1.0, 1.0)))
+    
+    # 傾き (tilt): 90度(平行) -> 0度, 0度(垂直) -> 90度
+    tilt_angle_from_parallel = abs(90.0 - theta_deg) # 0 (平行) 〜 90 (垂直)
+    
+    # 面積の推定 (単純なモデル)
+    tilt_angle_clipped = np.clip(tilt_angle_from_parallel, 0.0, 90.0)
+    
+    # sin(2 * angle) は 0->0, 45->1, 90->0 となる
+    estimated_area_ratio = np.sin(np.radians(tilt_angle_clipped * 2.0))
+    estimated_area = estimated_area_ratio * MAX_CONTACT_AREA_MM2
+    
+    return tilt_angle_from_parallel, estimated_area
 
 # ======== 3. メイン処理 ========
 def main():
@@ -232,6 +257,7 @@ def main():
                   "tip_plane_x", "tip_plane_y", "tip_plane_z",
                   "solder_plane_x", "solder_plane_y", "solder_plane_z",
                   "roll_deg", "pitch_deg", "yaw_deg",
+                  "tilt_angle", "est_area", 
                   "touch_tip_board", "touch_solder_board", "touch_tip_solder", "soldering_3way"]
         with open(LOG_PATH, "w", newline="") as f:
             writer = csv.writer(f)
@@ -251,6 +277,7 @@ def main():
     print("=== Soldering Tracking Start ===")
     print(f"Cube IDs: {CUBE_IDS}")
     print(f"Plane IDs: {PLANE_MARKER_IDS}")
+    print(f"Solder Hand: {HAND_FOR_SOLDER} | Iron Hand: {HAND_FOR_IRON}")
     print("Press 'q' to quit")
 
     while True:
@@ -278,7 +305,12 @@ def main():
         # カメラ座標系 (計算用)
         plane_center_cam = None
         plane_normal_cam = None
-        hit_solder_cam = None # 仮想ハンダのカメラ座標系でのヒット位置
+        hit_solder_cam = None 
+        
+        # 推定値
+        tilt_angle = 0.0
+        estimated_area = 0.0
+        euler = np.zeros(3)
 
         # --- (A) 基板 (Plane) のポーズ推定 ---
         if ids is not None:
@@ -287,10 +319,21 @@ def main():
                 plane_avail = True
                 cv2.drawFrameAxes(frame, camera_matrix, dist_coeffs, rvec_p, tvec_p, AXIS_LEN_PLANE)
                 
-                # 生の変換行列
+                # 基板中心 (ローカル 0,0,0) を投影して描画
+                project_point_and_draw(
+                    frame, 
+                    np.array([0.0, 0.0, 0.0]), # 基板中心
+                    rvec_p, # 投影には生のrvec/tvecを使用
+                    tvec_p,
+                    camera_matrix, 
+                    dist_coeffs, 
+                    color=(255, 0, 255), # 紫色
+                    radius=8
+                )
+                
                 T_plane_raw = rvec_tvec_to_transform(rvec_p, tvec_p)
                 center_raw = T_plane_raw[:3, 3]
-                normal_raw = T_plane_raw[:3, 2] # 基板のZ軸（法線）
+                normal_raw = T_plane_raw[:3, 2] 
 
                 if USE_SMOOTHING_PLANE:
                     if ema_plane_center is None:
@@ -299,14 +342,11 @@ def main():
                     else:
                         ema_plane_center = SMOOTH_ALPHA_PLANE * center_raw + (1 - SMOOTH_ALPHA_PLANE) * ema_plane_center
                         ema_plane_normal = SMOOTH_ALPHA_PLANE * normal_raw + (1 - SMOOTH_ALPHA_PLANE) * ema_plane_normal
-                        ema_plane_normal /= np.linalg.norm(ema_plane_normal) # 正規化
+                        ema_plane_normal /= np.linalg.norm(ema_plane_normal)
                     
                     plane_center_cam = ema_plane_center
                     plane_normal_cam = ema_plane_normal
-                    # EMA後の値からrvec, tvecを再構成するのは難しいため、T_planeは生の値を使い、
-                    # 指の交点計算のみEMA後の値を使う
                     T_plane = T_plane_raw
-                    
                 else:
                     plane_center_cam = center_raw
                     plane_normal_cam = normal_raw
@@ -322,50 +362,87 @@ def main():
                 cube_avail = True
                 cv2.drawFrameAxes(frame, camera_matrix, dist_coeffs, rvec_c, tvec_c, AXIS_LEN_CUBE)
                 T_cube = rvec_tvec_to_transform(rvec_c, tvec_c)
-                
-                # コテ先を画像に投影 (デバッグ用)
+                # コテ先を投影 (赤色)
                 project_point_and_draw(frame, TIP_OFFSET, rvec_c, tvec_c, camera_matrix, dist_coeffs, color=(0,0,255), radius=6)
 
         aruco.drawDetectedMarkers(frame, corners, ids)
 
         # --- (C) 手・仮想ハンダ (Solder) の認識 ---
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        rgb.flags.writeable = False # 処理速度向上のため
+        rgb.flags.writeable = False 
         results = hands.process(rgb)
         rgb.flags.writeable = True
 
-        if results.multi_hand_landmarks and plane_avail:
-            # 簡易的に、最初に見つかった手の人差し指(8)を使う
-            # TODO: 左右の手を識別し、ハンダを持つ手を特定するロジック
-            hand_landmarks = results.multi_hand_landmarks[0]
-            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-            
-            # 人差し指の先端(8)のピクセル座標 (u, v) を取得
-            tip_landmark = hand_landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
-            u = tip_landmark.x * frame.shape[1]
-            v = tip_landmark.y * frame.shape[0]
+        hand_landmarks_solder = None
+        hand_landmarks_iron = None
 
-            # カメラ座標系でのレイを生成
-            pt_cam = np.linalg.inv(camera_matrix) @ np.array([u, v, 1.0])
-            ray_dir = pt_cam / np.linalg.norm(pt_cam)
-            ray_origin = np.zeros(3) # カメラ原点
-
-            # 基板平面との交点 (カメラ座標系) を計算
-            hit_solder_cam = line_plane_intersection(plane_center_cam, plane_normal_cam, ray_origin, ray_dir)
-
-            if hit_solder_cam is not None:
-                solder_avail = True
-                # 交点を画像に描画 (デバッグ用)
-                project_point_cam_coord(frame, hit_solder_cam, camera_matrix, dist_coeffs, color=(0, 255, 255), radius=5)
-                # 基板座標系に変換
-                P_solder = camera_to_local(hit_solder_cam, T_plane_inv)
+        if results.multi_hand_landmarks and results.multi_handedness:
+            for landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
+                hand_label = handedness.classification[0].label
+                mp_drawing.draw_landmarks(frame, landmarks, mp_hands.HAND_CONNECTIONS)
                 
+                if hand_label == HAND_FOR_SOLDER:
+                    hand_landmarks_solder = landmarks
+                elif hand_label == HAND_FOR_IRON:
+                    hand_landmarks_iron = landmarks
+
+        # 仮想ハンダ (Solder) の位置計算 (新ロジック)
+        if hand_landmarks_solder and plane_avail:
+            try:
+                # 人差し指の先端(8) と 根元(7)
+                tip_landmark = hand_landmarks_solder.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
+                dip_landmark = hand_landmarks_solder.landmark[mp_hands.HandLandmark.INDEX_FINGER_DIP]
+
+                # ピクセル座標 (u, v) を取得
+                u_tip = tip_landmark.x * frame.shape[1]
+                v_tip = tip_landmark.y * frame.shape[0]
+                u_dip = dip_landmark.x * frame.shape[1]
+                v_dip = dip_landmark.y * frame.shape[0]
+
+                # (1) 指先 (TIP=8) のレイと基板の交点 P_tip_on_plane
+                pt_cam_tip = np.linalg.inv(camera_matrix) @ np.array([u_tip, v_tip, 1.0])
+                ray_dir_tip = pt_cam_tip / np.linalg.norm(pt_cam_tip)
+                P_tip_on_plane_cam = line_plane_intersection(plane_center_cam, plane_normal_cam, np.zeros(3), ray_dir_tip)
+
+                # (2) 指の根元 (DIP=7) のレイと基板の交点 P_dip_on_plane
+                pt_cam_dip = np.linalg.inv(camera_matrix) @ np.array([u_dip, v_dip, 1.0])
+                ray_dir_dip = pt_cam_dip / np.linalg.norm(pt_cam_dip)
+                P_dip_on_plane_cam = line_plane_intersection(plane_center_cam, plane_normal_cam, np.zeros(3), ray_dir_dip)
+
+                if P_tip_on_plane_cam is not None and P_dip_on_plane_cam is not None:
+                    # (3) 基板平面上での指の向きベクトル
+                    V_finger_cam = P_tip_on_plane_cam - P_dip_on_plane_cam
+                    norm_V_finger = np.linalg.norm(V_finger_cam)
+                    
+                    if norm_V_finger > 1e-6: # ゼロベクトルでなければ
+                        V_finger_cam_normalized = V_finger_cam / norm_V_finger
+                        
+                        # (4) 仮想ハンダの位置 (指先交点から 4cm 先)
+                        hit_solder_cam = P_tip_on_plane_cam + SOLDER_TIP_OFFSET_M * V_finger_cam_normalized
+                        solder_avail = True
+                        
+                        project_point_cam_coord(frame, hit_solder_cam, camera_matrix, dist_coeffs, color=(0, 255, 255), radius=5) # ハンダ先端 (黄色)
+                        project_point_cam_coord(frame, P_tip_on_plane_cam, camera_matrix, dist_coeffs, color=(255, 100, 100), radius=3) # 指先 (水色)
+                        
+                        P_solder = camera_to_local(hit_solder_cam, T_plane_inv)
+                
+                # 指が垂直などで方向が取れない場合、指先交点を採用
+                if not solder_avail and P_tip_on_plane_cam is not None:
+                    hit_solder_cam = P_tip_on_plane_cam
+                    solder_avail = True
+                    project_point_cam_coord(frame, hit_solder_cam, camera_matrix, dist_coeffs, color=(0, 255, 255), radius=5)
+                    P_solder = camera_to_local(hit_solder_cam, T_plane_inv)
+            
+            except Exception as e:
+                pass
+
 
         # --- (D) 座標計算と接触判定 ---
+        
+        # このフレームでの「生」の接触フラグ
         frame_touch_tip_board = False
         frame_touch_solder_board = False
         frame_touch_tip_solder = False
-        euler = np.zeros(3)
 
         if plane_avail and cube_avail:
             # (D-1) コテ先 (P_tip) の基板座標系での位置を計算
@@ -379,29 +456,31 @@ def main():
             T_plane_to_cube = T_plane_inv @ T_cube
             R_plane_to_cube_raw = T_plane_to_cube[:3,:3]
 
-            # (D-3) コテ先と角度の平滑化 (EMA)
+            # (D-3) コテ先と角度の平滑化 (EMA) と 面積推定
+            R_for_area_calc = None
             if USE_SMOOTHING_TIP:
-                # 位置
                 if ema_tip_pos is None: ema_tip_pos = P_tip_raw.copy()
                 else: ema_tip_pos = SMOOTH_ALPHA_TIP_POS * P_tip_raw + (1 - SMOOTH_ALPHA_TIP_POS) * ema_tip_pos
                 P_tip = ema_tip_pos
                 
-                # 姿勢
                 if ema_tip_rot_mat is None: ema_tip_rot_mat = R_plane_to_cube_raw.copy()
                 else:
                     M = SMOOTH_ALPHA_TIP_ROT * R_plane_to_cube_raw + (1 - SMOOTH_ALPHA_TIP_ROT) * ema_tip_rot_mat
-                    U, _, Vt = np.linalg.svd(M) # オルソノーマライズ
+                    U, _, Vt = np.linalg.svd(M) 
                     ema_tip_rot_mat = U @ Vt
                 
-                # EMA後の回転行列からオイラー角を計算
                 T_temp = np.eye(4); T_temp[:3,:3] = ema_tip_rot_mat
                 euler = np.degrees(transform_to_euler(T_temp))
+                R_for_area_calc = ema_tip_rot_mat # 平滑化後の回転行列
             else:
                 P_tip = P_tip_raw
                 euler = np.degrees(transform_to_euler(T_plane_to_cube))
+                R_for_area_calc = R_plane_to_cube_raw # 生の回転行列
 
-            
-            # (D-4) 接触判定
+            # (D-3b) 面積推定の実行
+            tilt_angle, estimated_area = estimate_contact_area(R_for_area_calc)
+
+            # (D-4) 接触判定 (生のフラグをセット)
             
             # (A) コテ先 vs 基板
             dist_z_tip = abs(P_tip[2])
@@ -411,12 +490,9 @@ def main():
             
             if solder_avail:
                 # (B) 仮想ハンダ vs 基板
-                # P_solder は既に基板座標系
                 dist_xy_solder = np.linalg.norm(P_solder[:2])
-                # Z距離は計算方法からほぼ0のはずだが、念のため
-                dist_z_solder = abs(P_solder[2]) 
-                
-                if (dist_xy_solder < SOLDER_BOARD_XY_THRESH) and (dist_z_solder < TIP_BOARD_Z_THRESH): # コテ先と同じZ閾値
+                dist_z_solder = abs(P_solder[2]) # Zはほぼ0のはず
+                if (dist_xy_solder < SOLDER_BOARD_XY_THRESH) and (dist_z_solder < TIP_BOARD_Z_THRESH):
                     frame_touch_solder_board = True
 
                 # (C) コテ先 vs 仮想ハンダ (3D距離)
@@ -426,21 +502,26 @@ def main():
 
         
         # (D-5) デバウンス処理
+        # (閾値を超えたフレームが N 回続いたら true になる)
         touch_confirmed_tip_board = False
         touch_confirmed_solder_board = False
         touch_confirmed_tip_solder = False
         touch_confirmed_3way = False
 
+        # 生フラグがTrueならカウントアップ、Falseなら0にリセット
         count_tip_board = (count_tip_board + 1) * frame_touch_tip_board
-        if count_tip_board >= TOUCH_CONFIRM_FRAMES: touch_confirmed_tip_board = True
-
-        count_solder_board = (count_solder_board + 1) * frame_touch_solder_board
-        if count_solder_board >= TOUCH_CONFIRM_FRAMES: touch_confirmed_solder_board = True
-
-        count_tip_solder = (count_tip_solder + 1) * frame_touch_tip_solder
-        if count_tip_solder >= TOUCH_CONFIRM_FRAMES: touch_confirmed_tip_solder = True
+        if count_tip_board >= TOUCH_CONFIRM_FRAMES: 
+            touch_confirmed_tip_board = True
         
-        # 3者同時接触
+        count_solder_board = (count_solder_board + 1) * frame_touch_solder_board
+        if count_solder_board >= TOUCH_CONFIRM_FRAMES: 
+            touch_confirmed_solder_board = True
+            
+        count_tip_solder = (count_tip_solder + 1) * frame_touch_tip_solder
+        if count_tip_solder >= TOUCH_CONFIRM_FRAMES: 
+            touch_confirmed_tip_solder = True
+        
+        # 3者同時 (デバウンス後のフラグで判定)
         if touch_confirmed_tip_board and touch_confirmed_solder_board and touch_confirmed_tip_solder:
             touch_confirmed_3way = True
 
@@ -458,18 +539,43 @@ def main():
         cv2.putText(frame, f"Rot(plane->cube): R={euler[0]:.1f} P={euler[1]:.1f} Y={euler[2]:.1f}",
                     (8,72), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,80), 2)
 
-        # 接触判定
-        color_tb = (0,255,0) if touch_confirmed_tip_board else (50,50,50)
-        cv2.putText(frame, f"Tip-Board", (8, 96), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_tb, 2)
         
-        color_sb = (0,255,0) if touch_confirmed_solder_board else (50,50,50)
-        cv2.putText(frame, f"Solder-Board", (120, 96), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_sb, 2)
+        Y_START = 100
+        Y_STEP = 24
+        
+        # 1. コテ vs 基板
+        status_tb = "CONTACT" if touch_confirmed_tip_board else "---"
+        color_tb = (0, 255, 0) if touch_confirmed_tip_board else (100, 100, 100)
+        cv2.putText(frame, f"1. Tip <-> Board: {status_tb}", (8, Y_START), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color_tb, 2)
 
-        color_ts = (0,255,0) if touch_confirmed_tip_solder else (50,50,50)
-        cv2.putText(frame, f"Tip-Solder", (250, 96), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_ts, 2)
+        # 2. ハンダ vs 基板
+        status_sb = "CONTACT" if touch_confirmed_solder_board else "---"
+        color_sb = (0, 255, 0) if touch_confirmed_solder_board else (100, 100, 100)
+        cv2.putText(frame, f"2. Solder <-> Board: {status_sb}", (8, Y_START + Y_STEP), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color_sb, 2)
+
+        # 3. コテ vs ハンダ
+        status_ts = "CONTACT" if touch_confirmed_tip_solder else "---"
+        color_ts = (0, 255, 0) if touch_confirmed_tip_solder else (100, 100, 100)
+        cv2.putText(frame, f"3. Tip <-> Solder: {status_ts}", (8, Y_START + 2*Y_STEP), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color_ts, 2)
+
+        # 4. 3者同時
+        cv2.rectangle(frame, (6, Y_START + 4*Y_STEP - 20), (350, Y_START + 4*Y_STEP + 10), (0,0,0), -1) # 背景
+        status_3way = "SOLDERING DETECTED!" if touch_confirmed_3way else "NOT READY"
+        color_3way = (0, 0, 255) if touch_confirmed_3way else (150, 150, 150)
+        cv2.putText(frame, f"STATUS: {status_3way}", (8, Y_START + 4*Y_STEP), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color_3way, 2)
         
-        if touch_confirmed_3way:
-            cv2.putText(frame, "SOLDERING DETECTED!", (8, 128), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
+        # 既存のデバッグ情報はY座標を調整して移動
+        Y_INFO_START = Y_START + 6*Y_STEP
+        cv2.putText(frame, f"Tip Tilt Angle: {tilt_angle:.1f} deg", (8, Y_INFO_START), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 100), 2)
+        cv2.putText(frame, f"Est. Area: {estimated_area:.2f} (mm2)", (8, Y_INFO_START + Y_STEP), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 100), 2)
+
+
+        # 手の検出ステータス (画面右上に表示)
+        solder_hand_status = "OK" if hand_landmarks_solder else "N/A"
+        iron_hand_status = "OK" if hand_landmarks_iron else "N/A"
+        cv2.putText(frame, f"Solder Hand ({HAND_FOR_SOLDER}): {solder_hand_status}", (frame.shape[1] - 280, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 0), 2)
+        cv2.putText(frame, f"Iron Hand ({HAND_FOR_IRON}): {iron_hand_status}", (frame.shape[1] - 280, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 0), 2)
+
 
         if LOG_CSV:
             log_data = [time.time(),
@@ -483,6 +589,7 @@ def main():
                         P_solder[1] if P_solder is not None else 0,
                         P_solder[2] if P_solder is not None else 0,
                         euler[0], euler[1], euler[2],
+                        tilt_angle, estimated_area, 
                         touch_confirmed_tip_board,
                         touch_confirmed_solder_board,
                         touch_confirmed_tip_solder,
