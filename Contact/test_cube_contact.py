@@ -47,13 +47,10 @@ def main():
     # Previous logic: Right(ID1) normal was -Z. Let's stick to ID0 as Anchor.
     # We only care about ID0 being detected or the whole board being detected.
     
-    # 簡易構築（ID0だけ分かれば回転は取れるため省略なしで定義推奨だが、ここでは既存ロジック流用）
-    # ... (前回のbuild_cube_boardと同じロジックが必要)
     def get_corners(c, u, v):
         h = MARKER_LEN_CUBE/2
         return np.array([c-u*h+v*h, c+u*h+v*h, c+u*h-v*h, c-u*h-v*h], dtype=np.float32)
     
-    # 前回の定義を再現
     X, Y, Z = np.array([1,0,0]), np.array([0,1,0]), np.array([0,0,1])
     obj_pts = [
         get_corners(np.array([0,0,half_d]), X, Y),      # ID0 Front
