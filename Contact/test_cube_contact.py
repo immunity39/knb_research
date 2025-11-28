@@ -5,7 +5,7 @@ import math
 
 # --- 設定 ---
 CALIBRATION_FILE = "calibration.yaml"
-CAM_ID = 0
+CAM_ID = 1
 MARKER_LEN_CUBE = 0.0315
 CUBE_W = 0.047
 CUBE_D = 0.040
